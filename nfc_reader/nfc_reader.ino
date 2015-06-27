@@ -7,35 +7,35 @@
  # Ver    : 0.1
  # Product: NFC Module for Arduino
  # SKU    : DFR0231
-    
+ 
  # Description:     
  # When the a card close to the device , the PC will receive the data 
  # Connect the NFC Card's TXD, RXD, GND, +3.3V to Nano's D0RX, D1TX, GND, +3.3V
  # Or connect the NFC Card's TXD, RXD, GND, +5V to Nano's D0RX, D1TX, GND, +5V
  
-  
+ 
  PN532 reads the tag by Arduino mega/Leonardo
  command list:
-  
+ 
  #wake up reader
  send: 55 55 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff 03 fd d4 14 01 17 00
  return: 00 00 FF 00 FF 00 00 00 FF 02 FE D5 15 16 00
-  
+ 
  #get firmware
  send: 00 00 FF 02 FE D4 02 2A 00
  return: 00 00 FF 00 FF 00 00 00 FF 06 FA D5 03 32 01 06 07 E8 00
-  
+ 
  #read the tag
  send: 00 00 FF 04 FC D4 4A 01 00 E1 00
  return: 00 00 FF 00 FF 00 00 00 FF 0C F4 D5 4B 01 01 00 04 08 04 XX XX XX XX 5A 00
  XX is tag.
-  
- */
-  
- //************* start **************
-
-
  
+ */
+
+//************* start **************
+
+
+
 const int red_led = 13;
 const int green_led = 9;
 const int blue_led = 10;
@@ -43,6 +43,9 @@ const int open_lock = 5;
 const int close_lock = 6;
 const int pwr_enable = 8;
 const int AUTH_START = 19;
+
+const int latch_up_switch = 11;
+const int latch_down_switch = 13;
 
 int lock_state = 0;
 
@@ -57,10 +60,10 @@ const unsigned char std_ACK[25] = {
   0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x0C, \
 0xF4, 0xD5, 0x4B, 0x01, 0x01, 0x00, 0x04, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x00};
 unsigned char old_id[5];
- 
+
 unsigned char receive_ACK[25];//Command receiving buffer
 //int inByte = 0;               //incoming serial byte buffer
- 
+
 #if defined(ARDUINO) && ARDUINO >= 100
 #include "Arduino.h"
 #define print1Byte(args) Serial1.write(args)
@@ -70,21 +73,26 @@ unsigned char receive_ACK[25];//Command receiving buffer
 #define print1Byte(args) Serial1.print(args,BYTE)
 #define print1lnByte(args)  Serial1.println(args,BYTE)
 #endif
- 
+
 void setup()
 {
   pinMode(red_led, OUTPUT); 
   pinMode(green_led, OUTPUT); 
   pinMode(blue_led, OUTPUT);
- 
+
   pinMode(open_lock, OUTPUT);
   pinMode(close_lock,OUTPUT); 
   digitalWrite(open_lock, HIGH);
   digitalWrite(close_lock, HIGH);
-  
+
+  pinMode(latch_up_switch, INPUT_PULLUP);
+  pinMode(latch_down_switch, INPUT_PULLUP);  
+
   pinMode(pwr_enable,OUTPUT);
   digitalWrite(pwr_enable, HIGH);
-  
+
+
+
   Serial.begin(9600);   // open serial with PC
   Serial1.begin(115200);    //open serial1 with device
   //Serial2.begin(115200);
@@ -93,10 +101,10 @@ void setup()
   read_ACK(15);
   delay(100);
   display(15);
- 
- 
+
+
 }
- 
+
 void loop()
 {
   send_tag(); 
@@ -111,8 +119,21 @@ void loop()
   }
   copy_id ();
 }
- 
- 
+
+int get_lock_position() { //Return: 0 Down, 1 Up, 2 Error/Stuck in between
+
+  int latch_up = digitalRead(latch_up_switch);
+  int latch_down = digitalRead(latch_down_switch);
+
+  if (latch_up == LOW && latch_down == HIGH){
+    return 0;
+  }
+  else if (latch_up == HIGH && latch_down == LOW){
+    return 1;
+  }
+  else return 2;     
+}
+
 void copy_id (void) 
 {//save old id
   int ai, oi;
@@ -120,8 +141,8 @@ void copy_id (void)
     old_id[oi] = receive_ACK[ai];
   }
 }
- 
-  
+
+
 char cmp_id (void) 
 {//return true if find id is old
   int ai, oi;
@@ -131,8 +152,8 @@ char cmp_id (void)
   }
   return 1;
 }
- 
- 
+
+
 int test_ACK (void) 
 {// return true if receive_ACK accord with std_ACK
   int i;
@@ -142,8 +163,8 @@ int test_ACK (void)
   }
   return 1;
 }
- 
- 
+
+
 void send_id (void) 
 {//send id to PC
   int i;
@@ -154,8 +175,8 @@ void send_id (void)
   }
   Serial.println ();
 }
- 
- 
+
+
 void UART1_Send_Byte(unsigned char command_data)
 {//send byte to device
   print1Byte(command_data);
@@ -163,15 +184,15 @@ void UART1_Send_Byte(unsigned char command_data)
   Serial1.flush();// complete the transmission of outgoing serial data 
 #endif
 } 
- 
- 
+
+
 void UART_Send_Byte(unsigned char command_data)
 {//send byte to PC
   Serial.print(command_data,HEX);
   Serial.print(" ");
 } 
- 
- 
+
+
 void read_ACK(unsigned char temp)
 {//read ACK into reveive_ACK[]
   unsigned char i;
@@ -179,24 +200,24 @@ void read_ACK(unsigned char temp)
     receive_ACK[i]= Serial1.read();
   }
 }
- 
- 
+
+
 void wake_card(void)
 {//send wake[] to device
   unsigned char i;
   for(i=0;i<24;i++) //send command
     UART1_Send_Byte(wake[i]);
 }
- 
- 
+
+
 void firmware_version(void)
 {//send fireware[] to device
   unsigned char i;
   for(i=0;i<9;i++) //send command
     UART1_Send_Byte(firmware[i]);
 }
- 
- 
+
+
 void send_tag(void)
 {//send tag[] to device
   unsigned char i;
@@ -210,15 +231,19 @@ void authorize()
   int j;
   boolean accepted = false;
   for(i=0; i< NUM_AUTH; i++){
+    //Serial.print((const char *)receive_ACK+AUTH_START);
+    //Serial.println(i);
     if( strncmp((const char *)receive_ACK+AUTH_START, auth_cards[i], AUTH_BYTES ) == 0 ){
       operate_lock();
       accepted= true;
+      Serial.println("OK");
       break;
     }
   }
   if( !accepted )
   {
     access_denied();
+    Serial.println("Denied");
   }
 }
 
@@ -230,21 +255,21 @@ void  access_denied(){
 
 void do_open_lock(){
   digitalWrite(pwr_enable, LOW);
-  delay(250);          
+  delay(1000);          
 
   digitalWrite(open_lock, LOW);    
-  delay(500);          
+  delay(1000);          
   digitalWrite(open_lock, HIGH);
 
   digitalWrite(pwr_enable, HIGH);
-  
+
 }  
 
 void do_close_lock(){
   digitalWrite(pwr_enable, LOW);
-  delay(250);          
+  delay(1000);          
   digitalWrite(close_lock, LOW);    
-  delay(500);               
+  delay(1000);               
   digitalWrite(close_lock, HIGH); 
   digitalWrite(pwr_enable, HIGH);
 }  
@@ -252,13 +277,27 @@ void do_close_lock(){
 
 void operate_lock(){
   indicate_lock_operated();
-  if( lock_state == 0 ){ //locked
-    do_open_lock();
-    lock_state = 1; //open
-  }
-  else{
+
+  int lock_position = get_lock_position();
+
+  Serial.print("Lock position is:"); Serial.println(lock_position);
+
+  if (lock_position == 0) { //Latch Down, Move latch up
     do_close_lock();
-    lock_state = 0; //closed
+  }
+
+  else if (lock_position == 1) { //Latch Up, Move latch down
+    do_open_lock();
+  }
+
+  else {  //Not registering on any switch, i.e. stuck in middle, just swap directions after every tag swipe
+    if(lock_state){
+      do_open_lock();
+    }
+    else{
+      do_close_lock();
+    }
+    lock_state = !lock_state;
   }
 }
 
@@ -271,15 +310,16 @@ void indicate_lock_operated(){
   delay(500);               // wait for a second
   digitalWrite(green_led, LOW);    // turn the LED off by making the voltage LOW
 }  
- 
+
 void display(unsigned char tem)
 {//send receive_ACK[] to PC
   unsigned char i;
   for(i=0;i<tem;i++) //send command
     UART_Send_Byte(receive_ACK[i]);
   Serial.println();
-  
+
 }
- 
- 
+
+
 //*********** end *************
+
